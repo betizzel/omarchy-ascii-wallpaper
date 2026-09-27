@@ -14,7 +14,7 @@ readonly menu_entry_id="style.asciiwallpaper"
 wire_menu() {
   local action="$plugin_dir/ascii-wallpaper-menu"
   python3 - "$menu_file" "$action" <<'PY'
-import re, sys, os
+import re, shutil, sys, os, tempfile
 
 path, action = sys.argv[1], sys.argv[2]
 entry = ('  "style.asciiwallpaper": {"icon":"\uf120","label":"ASCII Wallpaper",'
@@ -27,15 +27,21 @@ if os.path.exists(path):
     with open(path) as f:
         text = f.read()
 
+ENTRY = '"style.asciiwallpaper"'
 lines = text.splitlines()
 out, replaced = [], False
 for line in lines:
-    if '"style.asciiwallpaper"' in line:
-        if not replaced:
-            out.append(entry)
-            replaced = True
-        continue  # drop any duplicate lines for this id
-    out.append(line)
+    stripped = line.strip()
+    if not stripped.startswith(ENTRY):
+        out.append(line)  # comments/other entries that merely mention us
+        continue
+    if stripped.count("{") != stripped.count("}"):
+        sys.exit(f"ascii-wallpaper: {ENTRY} in {path} is not a single-line entry; "
+                 "leaving the file untouched (fix the entry by hand)")
+    if not replaced:
+        out.append(entry)
+        replaced = True
+    # drop any duplicate lines for this id
 
 if not replaced:
     # insert after the opening brace
@@ -47,9 +53,11 @@ if not replaced:
         out = ["{", entry, "}"]
 
 os.makedirs(os.path.dirname(path), exist_ok=True)
-tmp = path + ".tmp"
-with open(tmp, "w") as f:
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".omarchy-menu.", suffix=".tmp")
+with os.fdopen(fd, "w") as f:
     f.write("\n".join(out) + "\n")
+if os.path.exists(path):
+    shutil.copymode(path, tmp)  # mkstemp is 0600; keep the menu's own mode
 os.replace(tmp, path)
 PY
   omarchy menu refresh >/dev/null 2>&1 || true
@@ -58,7 +66,7 @@ PY
 unwire_menu() {
   [[ -f $menu_file ]] || return 0
   python3 - "$menu_file" <<'PY' || return 1
-import sys, os
+import shutil, sys, os, tempfile
 
 ENTRY = '"style.asciiwallpaper"'
 
@@ -88,9 +96,10 @@ if unsafe:
     sys.exit(f"ascii-wallpaper: {ENTRY} in {path} is not a single-line entry; "
              "leaving the file untouched (remove the entry by hand)")
 
-tmp = path + ".tmp"
-with open(tmp, "w") as f:
+fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".omarchy-menu.", suffix=".tmp")
+with os.fdopen(fd, "w") as f:
     f.write("\n".join(out) + "\n")
+shutil.copymode(path, tmp)  # mkstemp is 0600; keep the menu's own mode
 os.replace(tmp, path)
 PY
   omarchy menu refresh >/dev/null 2>&1 || true
