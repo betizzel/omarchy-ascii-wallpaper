@@ -10,17 +10,19 @@ readonly state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/ascii-wallpape
 readonly cleanup_helper="$state_dir/cleanup"
 readonly menu_file="$HOME/.config/omarchy/extensions/omarchy-menu.jsonc"
 readonly menu_entry_id="style.asciiwallpaper"
+# The exact line this plugin writes; only a line identical to it is ours to
+# replace or remove. The icon is U+F120 spelled as UTF-8 bytes so the result
+# does not depend on the locale.
+readonly menu_icon=$'\xef\x84\xa0'
+readonly menu_entry="  \"$menu_entry_id\": {\"icon\":\"$menu_icon\",\"label\":\"ASCII Wallpaper\",\"aliases\":[\"ascii\",\"asciiwallpaper\",\"ascii-wallpaper\"],\"description\":\"Convert a video into an ASCII-art wallpaper in theme colors\",\"action\":\"omarchy-launch-floating-terminal-with-presentation $plugin_dir/ascii-wallpaper-menu\"},"
 
 wire_menu() {
-  local action="$plugin_dir/ascii-wallpaper-menu"
-  python3 - "$menu_file" "$action" <<'PY'
+  python3 - "$menu_file" "$menu_entry" <<'PY'
 import re, shutil, sys, os, tempfile
 
-path, action = sys.argv[1], sys.argv[2]
-entry = ('  "style.asciiwallpaper": {"icon":"\uf120","label":"ASCII Wallpaper",'
-         '"aliases":["ascii","asciiwallpaper","ascii-wallpaper"],'
-         '"description":"Convert a video into an ASCII-art wallpaper in theme colors",'
-         f'"action":"omarchy-launch-floating-terminal-with-presentation {action}"}},')
+# Resolve symlinks: a menu linked in from a dotfiles repo is edited in place,
+# not replaced by a regular file.
+path, entry = os.path.realpath(sys.argv[1]), sys.argv[2]
 
 text = ""
 if os.path.exists(path):
@@ -29,30 +31,57 @@ if os.path.exists(path):
 
 ENTRY = '"style.asciiwallpaper"'
 lines = text.splitlines()
-out, replaced = [], False
+# Ours = a line identical to what this plugin writes. Any other line starting
+# with our key was hand-edited or written by someone else: keep it as-is.
+out, replaced, foreign = [], False, False
 for line in lines:
     stripped = line.strip()
-    if not stripped.startswith(ENTRY):
-        out.append(line)  # comments/other entries that merely mention us
-        continue
-    if stripped.count("{") != stripped.count("}"):
-        sys.exit(f"ascii-wallpaper: {ENTRY} in {path} is not a single-line entry; "
-                 "leaving the file untouched (fix the entry by hand)")
-    if not replaced:
-        out.append(entry)
-        replaced = True
-    # drop any duplicate lines for this id
+    if stripped == entry.strip():
+        if not replaced:
+            out.append(entry)
+            replaced = True
+        continue  # drop duplicate copies of our own entry
+    if stripped.startswith(ENTRY):
+        foreign = True
+    out.append(line)
+
+if not replaced and foreign:
+    print(f"ascii-wallpaper: {path} already has a {ENTRY} entry this plugin "
+          "did not write; leaving it alone", file=sys.stderr)
+    sys.exit(0)
 
 if not replaced:
-    # insert after the opening brace
-    for i, line in enumerate(out):
-        if "{" in line:
-            out.insert(i + 1, entry)
+    # Our line goes right after the '{' that opens the top-level object. Skip
+    # the whitespace and comments before it: a '{' inside a leading comment
+    # isn't the object, and the object may close on the same line ("{}").
+    body = "\n".join(out)
+    i = 0
+    while i < len(body):
+        if body[i].isspace() or body[i] == "\ufeff":
+            i += 1
+        elif body.startswith("//", i):
+            j = body.find("\n", i)
+            i = len(body) if j < 0 else j
+        elif body.startswith("/*", i) and "*/" in body[i + 2:]:
+            i = body.index("*/", i + 2) + 2
+        else:
             break
+    if i == len(body):  # no file, or only whitespace and comments
+        out = (out if body.strip() else []) + ["{", entry, "}"]
+    elif body[i] == "{":
+        row = body.count("\n", 0, i)
+        col = i - body.rfind("\n", 0, i) - 1
+        rest = out[row][col + 1:].strip()
+        if not rest or rest.startswith("//"):
+            out.insert(row + 1, entry)
+        else:  # "{}" or "{ ...entries }" on one line: split after the brace
+            out[row:row + 1] = [out[row][:col + 1], entry, rest]
     else:
-        out = ["{", entry, "}"]
+        print(f"ascii-wallpaper: {path} is not a JSONC object; leaving it alone",
+              file=sys.stderr)
+        sys.exit(0)
 
-os.makedirs(os.path.dirname(path), exist_ok=True)
+os.makedirs(os.path.dirname(sys.argv[1]), exist_ok=True)  # not where a broken link points
 fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".omarchy-menu.", suffix=".tmp")
 with os.fdopen(fd, "w") as f:
     f.write("\n".join(out) + "\n")
@@ -65,36 +94,19 @@ PY
 
 unwire_menu() {
   [[ -f $menu_file ]] || return 0
-  python3 - "$menu_file" <<'PY' || return 1
+  python3 - "$menu_file" "$menu_entry" <<'PY' || return 1
 import shutil, sys, os, tempfile
 
-ENTRY = '"style.asciiwallpaper"'
-
-path = sys.argv[1]
+path, entry = os.path.realpath(sys.argv[1]), sys.argv[2]  # keep symlinks intact
 with open(path) as f:
     lines = f.read().splitlines()
 
-# Only remove an entry we are certain we wrote: our own id, at the start of the
-# line, with balanced braces so the whole object lives on that one line. Any
-# other shape (reformatted, hand-edited, split across lines) is left alone --
-# a stale menu row is recoverable, a corrupted omarchy-menu.jsonc is not.
-out, unsafe = [], False
-for line in lines:
-    if ENTRY not in line:
-        out.append(line)
-        continue
-    stripped = line.strip()
-    if stripped.startswith("//"):  # a comment mentioning us; not ours to touch
-        out.append(line)
-    elif stripped.startswith(ENTRY) and stripped.count("{") == stripped.count("}"):
-        continue
-    else:
-        out.append(line)
-        unsafe = True
-
-if unsafe:
-    sys.exit(f"ascii-wallpaper: {ENTRY} in {path} is not a single-line entry; "
-             "leaving the file untouched (remove the entry by hand)")
+# Only remove a line identical to what this plugin writes. Anything else
+# carrying our key (hand-edited, reformatted, or another extension's entry) is
+# left alone -- a stale menu row is recoverable, a clobbered user entry is not.
+out = [line for line in lines if line.strip() != entry.strip()]
+if len(out) == len(lines):
+    sys.exit(0)  # nothing of ours in the file; don't rewrite it
 
 fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".omarchy-menu.", suffix=".tmp")
 with os.fdopen(fd, "w") as f:

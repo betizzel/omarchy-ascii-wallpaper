@@ -6,15 +6,15 @@ Convert any video into an **ASCII-art live wallpaper** tinted to your current Om
 
 Found a gorgeous video wallpaper online that clashes with your colorscheme? This transcodes it into a grid of monospace glyphs where every color is snapped to your theme's `colors.toml` so it always matches.
 
-Works great with [tenzin.live-wallpaper](https://plugins.omarchy.org/plugin.html?id=tenzin.live-wallpaper) (what I use)
-
-video-wallpaper plugin — the output is a plain `.mp4` in your theme's
-backgrounds folder, so it shows up in the normal background picker.
+Works great with [tenzin.live-wallpaper](https://plugins.omarchy.org/plugin.html?id=tenzin.live-wallpaper)
+(what I use) or any other video-wallpaper plugin — the output is a plain
+`.mp4` in your theme's backgrounds folder, so it shows up in the normal
+background picker.
 
 ## Install
 
 ```
-omarchy plugin add https://github.com/Betim-Hodza/omarchy-ascii-wallpaper
+omarchy plugin add https://github.com/betizzel/omarchy-ascii-wallpaper
 ```
 
 Then enable `betim.ascii-wallpaper` in **Setup > Plugins** (or `omarchy plugin enable betim.ascii-wallpaper`).
@@ -64,14 +64,20 @@ No Python packages needed, just `ffmpeg` and `imagemagick`, both already on a st
 omarchy plugin remove betim.ascii-wallpaper
 ```
 
-Disabling or removing the plugin unwires its menu entry automatically. Already-
-converted `-ascii.mp4` files are plain videos and are left in place.
+Disabling or removing the plugin unwires its menu entry automatically, unless
+you've edited that entry (see Notes). Already-converted `-ascii.mp4` files are
+plain videos and are left in place.
 
 ## Notes
 
 - Theme colors are baked into the output video. After switching themes, re-run
   the conversion to re-tint.
 - Requires `gum` for the picker flow (stock on Omarchy).
+- The plugin only adds or removes its own line in
+  `~/.config/omarchy/extensions/omarchy-menu.jsonc`, and edits through a
+  symlink if that file lives in your dotfiles. If you edit the line, or another
+  entry already uses `style.asciiwallpaper`, the plugin leaves it alone: it
+  won't overwrite it on load or remove it on uninstall.
 
 ## License
 
